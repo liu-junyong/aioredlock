@@ -101,19 +101,10 @@ class Instance:
         return "<%s(connection='%s'>" % (self.__class__.__name__, connection_details)
 
     @staticmethod
-    async def _create_redis_pool(*args, **kwargs):
+    def _create_redis_pool(*args, **kwargs):
         """
-        Adapter to support both aioredis-0.3.0 and aioredis-1.0.0
-        For aioredis-1.0.0 and later calls:
-            aioredis.create_redis_pool(*args, **kwargs)
-        For aioredis-0.3.0 calls:
-            aioredis.create_pool(*args, **kwargs)
         """
-
-        if StrictVersion(aioredis.__version__) >= StrictVersion('1.0.0'):  # pragma no cover
-            return await aioredis.create_redis_pool(*args, **kwargs)
-        else:  # pragma no cover
-            return await aioredis.create_pool(*args, **kwargs)
+        return aioredis.ConnectionPool.from_url(*args, **kwargs)
 
     async def _register_scripts(self, redis):
         tasks = []
@@ -163,13 +154,13 @@ class Instance:
             async with self._lock:
                 if self._pool is None:
                     self.log.debug('Connecting %s', repr(self))
-                    self._pool = await self._create_redis_pool(address, **redis_kwargs)
+                    self._pool = self._create_redis_pool(address, **redis_kwargs)
 
         if self.set_lock_script_sha1 is None or self.unset_lock_script_sha1 is None:
-            with await self._pool as redis:
-                await self._register_scripts(redis)
+            # with await self._pool as redis:
+            await self._register_scripts(self._pool)
 
-        return await self._pool
+        return self._pool
 
     async def close(self):
         """
@@ -192,14 +183,15 @@ class Instance:
         lock_timeout_ms = int(lock_timeout * 1000)
 
         try:
-            with await self.connect() as redis:
-                if register_scripts is True:
-                    await self._register_scripts(redis)
-                await redis.evalsha(
-                    self.set_lock_script_sha1,
-                    keys=[resource],
-                    args=[lock_identifier, lock_timeout_ms]
-                )
+            redis = await self.connect()
+            # with await self.connect() as redis:
+            if register_scripts is True:
+                await self._register_scripts(redis)
+            await redis.evalsha(
+                self.set_lock_script_sha1,
+                1,
+                resource,lock_identifier, lock_timeout_ms
+            )
         except aioredis.errors.ReplyError as exc:  # script fault
             if exc.args[0].startswith('NOSCRIPT'):
                 return await self.set_lock(resource, lock_identifier, lock_timeout, register_scripts=True)
@@ -230,14 +222,16 @@ class Instance:
         :raises: LockError if lock is not available
         """
         try:
-            with await self.connect() as redis:
-                if register_scripts is True:
-                    await self._register_scripts(redis)
-                ttl = await redis.evalsha(
-                    self.get_lock_ttl_script_sha1,
-                    keys=[resource],
-                    args=[lock_identifier]
-                )
+            redis = await self.connect()
+            # with await self.connect() as redis:
+            if register_scripts is True:
+                await self._register_scripts(redis)
+            ttl = await redis.evalsha(
+                self.get_lock_ttl_script_sha1,
+                1,
+                # keys=[resource],
+                resource,lock_identifier
+            )
         except aioredis.errors.ReplyError as exc:  # script fault
             if exc.args[0].startswith('NOSCRIPT'):
                 return await self.get_lock_ttl(resource, lock_identifier, register_scripts=True)
@@ -268,14 +262,16 @@ class Instance:
         :raises: LockError if the lock resource acquired with different lock_identifier
         """
         try:
-            with await self.connect() as redis:
-                if register_scripts is True:
-                    await self._register_scripts(redis)
-                await redis.evalsha(
-                    self.unset_lock_script_sha1,
-                    keys=[resource],
-                    args=[lock_identifier]
-                )
+            redis = await self.connect()
+            # with await self.connect() as redis:
+            if register_scripts is True:
+                await self._register_scripts(redis)
+            await redis.evalsha(
+                self.unset_lock_script_sha1,
+                1,
+                # keys=[resource],
+                resource,lock_identifier
+            )
         except aioredis.errors.ReplyError as exc:  # script fault
             if exc.args[0].startswith('NOSCRIPT'):
                 return await self.unset_lock(resource, lock_identifier, register_scripts=True)
@@ -305,8 +301,9 @@ class Instance:
         :returns: True if locked else False
         """
 
-        with await self.connect() as redis:
-            lock_identifier = await redis.get(resource)
+        redis = await self.connect()
+        # with await self.connect() as redis:
+        lock_identifier = await redis.get(resource)
         if lock_identifier:
             return True
         else:

@@ -1,5 +1,11 @@
 import json
 
+if __name__ == '__main__':
+    import sys
+
+    sys.path.append(sys.path[0] + '/../..')
+    sys.path.append(sys.path[0] + '/..')
+
 import pytest
 from aioredlock.utility import clean_password
 

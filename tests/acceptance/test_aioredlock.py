@@ -4,13 +4,62 @@ import uuid
 
 import aioredis
 import pytest
+from loguru import logger
 
 from aioredlock import Aioredlock, LockError
 
 
+def singleton(cls, *args, **kwargs):
+    instances = {}
+
+    def __singleton():
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)
+        return instances[cls]
+
+    return __singleton
+
+REDIS_URI="redis://localhost:6379"
+redis_db=0
+
+@singleton
+class Redis:
+    _client: aioredis.Redis
+
+    def __init__(self):
+        self.init_redis()
+
+    def init_redis(self):
+        try:
+            self._client = aioredis.from_url(REDIS_URI, encoding="utf-8", db=redis_db)
+        except Exception as e:
+            logger.error("redis 连接失败：{}", REDIS_URI)
+            logger.error(e)
+
+    def __getattr__(self, item):
+        return getattr(self._client, item)
+
+    def ins(self):
+        return self._client
+
+
+redis_instances = [
+    REDIS_URI,
+]
+
+redis = Redis()
+
+
+if __name__ == '__main__':
+    import sys
+
+    sys.path.append(sys.path[0] + '/../..')
+    sys.path.append(sys.path[0] + '/..')
+
 @pytest.fixture
 def redis_one_connection():
-    return [{'host': 'localhost', 'port': 6379, 'db': 0}]
+    return [redis.ins()]
+    # return [{'host': 'localhost', 'port': 6379, 'db': 0}]
 
 
 @pytest.fixture
@@ -100,8 +149,10 @@ class TestAioredlock:
     async def test_simple_aioredlock_one_instance_pool(
             self,
             redis_one_connection):
-        address = 'redis://{host}:{port}/{db}'.format(**redis_one_connection[0])
-        pool = await aioredis.create_redis_pool(address=address, encoding='utf-8')
+        # address = 'redis://{host}:{port}/{db}'.format(**redis_one_connection[0])
+        address = REDIS_URI
+        # pool = await aioredis.create_redis_pool(address=address, encoding='utf-8')
+        pool = aioredis.ConnectionPool.from_url(address)
         await self.check_simple_lock(Aioredlock([pool]))
 
     @pytest.mark.asyncio
@@ -149,7 +200,7 @@ class TestAioredlock:
         resource = str(uuid.uuid4())
         garbage_value = 'garbage'
 
-        first_redis = await aioredis.create_redis(
+        first_redis = aioredis.ConnectionPool(
             (redis_two_connections[0]['host'],
              redis_two_connections[0]['port'])
         )
