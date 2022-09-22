@@ -157,9 +157,7 @@ class Instance:
                     self._pool = self._create_redis_pool(address, **redis_kwargs)
 
         if self.set_lock_script_sha1 is None or self.unset_lock_script_sha1 is None:
-            # with await self._pool as redis:
-            redis = await self.connect()
-            await self._register_scripts(redis)
+            await self._register_scripts(self._pool)
 
         return self._pool
 
