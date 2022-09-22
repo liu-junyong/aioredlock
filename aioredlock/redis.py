@@ -158,7 +158,8 @@ class Instance:
 
         if self.set_lock_script_sha1 is None or self.unset_lock_script_sha1 is None:
             # with await self._pool as redis:
-            await self._register_scripts(self._pool)
+            redis = await self.connect()
+            await self._register_scripts(redis)
 
         return self._pool
 
